@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configuration MWHA Weather",
+        "description": "Entrez votre localisation pour les donnees meteo Open-Meteo.",
+        "data": {
+          "location_name": "Nom de la localisation",
+          "latitude": "Latitude (vide = localisation Home Assistant)",
+          "longitude": "Longitude (vide = localisation Home Assistant)",
+          "update_interval": "Intervalle de rafraichissement",
+          "history_days": "Nombre de jours pour l analyse de tendance"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfiguration MWHA Weather",
+        "description": "Mettez a jour la localisation, l intervalle de rafraichissement et le nombre de jours.",
+        "data": {
+          "location_name": "Nom de la localisation",
+          "latitude": "Latitude (vide = localisation Home Assistant)",
+          "longitude": "Longitude (vide = localisation Home Assistant)",
+          "update_interval": "Intervalle de rafraichissement",
+          "history_days": "Nombre de jours pour l analyse de tendance"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Cette localisation est deja configuree."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options MWHA Weather",
+        "description": "Ajustez l intervalle de rafraichissement et la fenetre historique de l analyse.",
+        "data": {
+          "update_interval": "Intervalle de rafraichissement",
+          "history_days": "Nombre de jours pour l analyse de tendance"
+        }
+      }
+    }
+  }
+}

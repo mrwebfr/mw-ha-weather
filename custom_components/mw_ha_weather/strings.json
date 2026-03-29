@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "MWHA Weather Configuration",
+        "description": "Enter your location for Open-Meteo weather data.",
+        "data": {
+          "location_name": "Location name",
+          "latitude": "Latitude (empty = Home Assistant location)",
+          "longitude": "Longitude (empty = Home Assistant location)",
+          "update_interval": "Update interval",
+          "history_days": "History days for trend analysis"
+        }
+      },
+      "reconfigure": {
+        "title": "MWHA Weather Reconfiguration",
+        "description": "Update location, refresh interval, and history days.",
+        "data": {
+          "location_name": "Location name",
+          "latitude": "Latitude (empty = Home Assistant location)",
+          "longitude": "Longitude (empty = Home Assistant location)",
+          "update_interval": "Update interval",
+          "history_days": "History days for trend analysis"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This location is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "MWHA Weather Options",
+        "description": "Adjust refresh interval and history window for the trend analysis.",
+        "data": {
+          "update_interval": "Update interval",
+          "history_days": "History days for trend analysis"
+        }
+      }
+    }
+  }
+}

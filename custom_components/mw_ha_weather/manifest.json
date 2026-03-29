@@ -1,0 +1,13 @@
+{
+  "domain": "mw_ha_weather",
+  "name": "MWHA Weather",
+  "version": "0.1.0",
+  "documentation": "https://github.com/mrwebfr/mw-ha-weather",
+  "issue_tracker": "https://github.com/mrwebfr/mw-ha-weather/issues",
+  "requirements": ["aiohttp>=3.8.0"],
+  "dependencies": ["recorder"],
+  "codeowners": ["@mrwebfr"],
+  "config_flow": true,
+  "iot_class": "cloud_polling",
+  "integration_type": "service"
+}
