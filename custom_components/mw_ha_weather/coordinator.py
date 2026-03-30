@@ -79,6 +79,7 @@ class MWHAWeatherCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ]
             ),
             "forecast_days": 7,
+            "forecast_hours": 24,
         }
 
         try:
