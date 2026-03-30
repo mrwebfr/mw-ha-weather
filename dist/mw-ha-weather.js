@@ -348,6 +348,7 @@ MWHA.Api = {
         'apparent_temperature',
         'relative_humidity_2m',
         'pressure_msl',
+        'visibility',
         'wind_speed_10m',
         'wind_direction_10m',
         'weather_code',
@@ -389,7 +390,9 @@ MWHA.Api = {
         feels_like: this._normalizeTemperature(current.apparent_temperature, units),
         humidity: current.relative_humidity_2m,
         pressure: current.pressure_msl,
-        visibility: this._findCurrentVisibility(data),
+        visibility: current.visibility != null
+          ? current.visibility
+          : this._findCurrentVisibility(data),
         wind_speed: current.wind_speed_10m,
         wind_deg: current.wind_direction_10m,
         description: this._getWeatherDescription(currentCode, lang),
