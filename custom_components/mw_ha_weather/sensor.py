@@ -111,6 +111,7 @@ class MWHAWeatherSensor(
     """Representation of a MWHA Weather sensor."""
 
     _attr_has_entity_name = True
+    _attr_force_update = True
 
     def __init__(
         self,
