@@ -16,6 +16,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     await _async_migrate_duplicated_entity_ids(hass, entry)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     coordinator = MWHAWeatherCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
@@ -61,3 +62,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
+
+
+async def _async_update_listener(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Reload the entry when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)

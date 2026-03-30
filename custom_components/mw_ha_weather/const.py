@@ -13,7 +13,7 @@ CONF_LONGITUDE = "longitude"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_HISTORY_DAYS = "history_days"
 
-DEFAULT_UPDATE_INTERVAL = 15  # minutes
+DEFAULT_UPDATE_INTERVAL = 10  # minutes
 DEFAULT_HISTORY_DAYS = 14
 
 # Mapping Open-Meteo WMO codes -> HA condition strings
