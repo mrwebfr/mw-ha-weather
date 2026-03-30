@@ -1,5 +1,6 @@
 """Sensor entities for MWHA Weather."""
 
+from collections import defaultdict
 from collections.abc import Mapping
 from datetime import timedelta
 from statistics import mean
@@ -287,19 +288,19 @@ class MWHAWeatherTrendSensor(
         end,
     ) -> dict[str, Any]:
         """Analyze recorded data across the configured past period."""
-        midpoint = start + (end - start) / 2
+        bucket_hours = self._bucket_hours()
 
-        temperature = self._partition_numeric_states(
-            histories.get("temperature", []), midpoint
+        temperature = self._aggregate_numeric_states(
+            histories.get("temperature", []), start, end, bucket_hours
         )
-        humidity = self._partition_numeric_states(
-            histories.get("humidity", []), midpoint
+        humidity = self._aggregate_numeric_states(
+            histories.get("humidity", []), start, end, bucket_hours
         )
-        pressure = self._partition_numeric_states(
-            histories.get("pressure", []), midpoint
+        pressure = self._aggregate_numeric_states(
+            histories.get("pressure", []), start, end, bucket_hours
         )
-        wind = self._partition_numeric_states(
-            histories.get("wind_speed", []), midpoint
+        wind = self._aggregate_numeric_states(
+            histories.get("wind_speed", []), start, end, bucket_hours
         )
 
         coverage_days = min(
@@ -308,21 +309,18 @@ class MWHAWeatherTrendSensor(
             self._covered_days(pressure),
             self._covered_days(wind),
         )
-        minimum_required_days = max(1.5, self._history_days - 1)
+        minimum_required_days = self._minimum_required_coverage_days()
+        minimum_bucket_count = self._minimum_bucket_count()
 
         if (
-            len(temperature["all"]) < 10
-            or len(humidity["all"]) < 10
-            or len(pressure["all"]) < 10
-            or len(wind["all"]) < 10
-            or len(temperature["first"]) < 3
-            or len(temperature["last"]) < 3
-            or len(humidity["first"]) < 3
-            or len(humidity["last"]) < 3
-            or len(pressure["first"]) < 3
-            or len(pressure["last"]) < 3
-            or len(wind["first"]) < 3
-            or len(wind["last"]) < 3
+            len(temperature["raw_values"]) < 10
+            or len(humidity["raw_values"]) < 10
+            or len(pressure["raw_values"]) < 10
+            or len(wind["raw_values"]) < 10
+            or len(temperature["series"]) < minimum_bucket_count
+            or len(humidity["series"]) < minimum_bucket_count
+            or len(pressure["series"]) < minimum_bucket_count
+            or len(wind["series"]) < minimum_bucket_count
             or coverage_days < minimum_required_days
         ):
             return {
@@ -337,18 +335,20 @@ class MWHAWeatherTrendSensor(
                     "configured_history_days": self._history_days,
                     "available_history_days": round(coverage_days, 1),
                     "required_history_days": round(minimum_required_days, 1),
+                    "bucket_hours": bucket_hours,
+                    "minimum_bucket_count": minimum_bucket_count,
                 },
             }
 
-        pressure_first = mean(pressure["first"])
-        pressure_last = mean(pressure["last"])
-        humidity_first = mean(humidity["first"])
-        humidity_last = mean(humidity["last"])
-        wind_first = mean(wind["first"])
-        wind_last = mean(wind["last"])
-        temp_first = mean(temperature["first"])
-        temp_last = mean(temperature["last"])
-        temp_range = max(temperature["all"]) - min(temperature["all"])
+        pressure_first = self._series_edge_mean(pressure["series"], at_start=True)
+        pressure_last = self._series_edge_mean(pressure["series"], at_start=False)
+        humidity_first = self._series_edge_mean(humidity["series"], at_start=True)
+        humidity_last = self._series_edge_mean(humidity["series"], at_start=False)
+        wind_first = self._series_edge_mean(wind["series"], at_start=True)
+        wind_last = self._series_edge_mean(wind["series"], at_start=False)
+        temp_first = self._series_edge_mean(temperature["series"], at_start=True)
+        temp_last = self._series_edge_mean(temperature["series"], at_start=False)
+        temp_range = max(temperature["series"]) - min(temperature["series"])
 
         pressure_delta = pressure_last - pressure_first
         humidity_delta = humidity_last - humidity_first
@@ -409,6 +409,16 @@ class MWHAWeatherTrendSensor(
             "configured_history_days": self._history_days,
             "available_history_days": round(coverage_days, 1),
             "required_history_days": round(minimum_required_days, 1),
+            "bucket_hours": bucket_hours,
+            "minimum_bucket_count": minimum_bucket_count,
+            "temperature_samples": len(temperature["raw_values"]),
+            "humidity_samples": len(humidity["raw_values"]),
+            "pressure_samples": len(pressure["raw_values"]),
+            "wind_samples": len(wind["raw_values"]),
+            "temperature_buckets": len(temperature["series"]),
+            "humidity_buckets": len(humidity["series"]),
+            "pressure_buckets": len(pressure["series"]),
+            "wind_buckets": len(wind["series"]),
             "pressure_avg_first_period": round(pressure_first, 1),
             "pressure_avg_last_period": round(pressure_last, 1),
             "pressure_delta": round(pressure_delta, 1),
@@ -424,12 +434,17 @@ class MWHAWeatherTrendSensor(
         }
         return trend
 
-    @staticmethod
-    def _partition_numeric_states(states: list[State], midpoint) -> dict[str, list[float]]:
-        """Split numeric history into first and second half of the period."""
-        first: list[float] = []
-        last: list[float] = []
-        all_values: list[float] = []
+    def _aggregate_numeric_states(
+        self,
+        states: list[State],
+        start,
+        end,
+        bucket_hours: int,
+    ) -> dict[str, Any]:
+        """Aggregate history into regular time buckets to reduce recorder bias."""
+        bucket_seconds = bucket_hours * 3600
+        buckets: dict[int, list[float]] = defaultdict(list)
+        raw_values: list[float] = []
         timestamps = []
 
         for state in states:
@@ -438,25 +453,33 @@ class MWHAWeatherTrendSensor(
             except (TypeError, ValueError):
                 continue
 
-            all_values.append(value)
-            if state.last_updated:
-                timestamps.append(state.last_updated)
-            if state.last_updated and state.last_updated < midpoint:
-                first.append(value)
-            else:
-                last.append(value)
+            if not state.last_updated:
+                continue
 
-        if not first and all_values:
-            first = all_values[: max(1, len(all_values) // 2)]
-        if not last and all_values:
-            last = all_values[max(1, len(all_values) // 2) :]
+            timestamps.append(state.last_updated)
+            raw_values.append(value)
+
+            elapsed = (state.last_updated - start).total_seconds()
+            if elapsed < 0:
+                continue
+
+            index = int(elapsed // bucket_seconds)
+            buckets[index].append(value)
 
         timestamps.sort()
+        window_bucket_count = max(
+            1,
+            int(((end - start).total_seconds() + bucket_seconds - 1) // bucket_seconds),
+        )
+        series = [
+            mean(buckets[index])
+            for index in range(window_bucket_count)
+            if buckets.get(index)
+        ]
 
         return {
-            "first": first,
-            "last": last,
-            "all": all_values,
+            "series": series,
+            "raw_values": raw_values,
             "timestamps": timestamps,
         }
 
@@ -468,3 +491,36 @@ class MWHAWeatherTrendSensor(
             return 0.0
 
         return (timestamps[-1] - timestamps[0]).total_seconds() / 86400
+
+    def _minimum_required_coverage_days(self) -> float:
+        """Return the minimum real coverage required for the configured window."""
+        if self._history_days <= 1:
+            return 0.5
+        if self._history_days == 2:
+            return 1.0
+        return max(1.5, self._history_days - 1)
+
+    def _bucket_hours(self) -> int:
+        """Return the aggregation granularity suited to the configured window."""
+        if self._history_days <= 2:
+            return 6
+        if self._history_days <= 7:
+            return 12
+        return 24
+
+    def _minimum_bucket_count(self) -> int:
+        """Return the minimum number of aggregated buckets required."""
+        if self._history_days <= 1:
+            return 3
+        if self._history_days <= 2:
+            return 4
+        if self._history_days <= 7:
+            return 5
+        return 7
+
+    @staticmethod
+    def _series_edge_mean(series: list[float], at_start: bool) -> float:
+        """Average the first or last third of a regularized series."""
+        edge_size = max(2, len(series) // 3)
+        edge = series[:edge_size] if at_start else series[-edge_size:]
+        return mean(edge)

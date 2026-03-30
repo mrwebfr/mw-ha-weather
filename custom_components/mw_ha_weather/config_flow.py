@@ -72,7 +72,7 @@ class MWHAWeatherConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): vol.In({5: "5 min", 10: "10 min", 15: "15 min", 30: "30 min"}),
                 vol.Optional(
                     CONF_HISTORY_DAYS, default=DEFAULT_HISTORY_DAYS
-                ): vol.All(vol.Coerce(int), vol.Range(min=2, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
             }
         )
 
@@ -142,7 +142,7 @@ class MWHAWeatherConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_HISTORY_DAYS,
                         entry.data.get(CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS),
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=2, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
             }
         )
 
@@ -186,7 +186,7 @@ class MWHAWeatherOptionsFlow(config_entries.OptionsFlow):
                 ): vol.In({5: "5 min", 10: "10 min", 15: "15 min", 30: "30 min"}),
                 vol.Optional(
                     CONF_HISTORY_DAYS, default=current_history_days
-                ): vol.All(vol.Coerce(int), vol.Range(min=2, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
             }
         )
 
