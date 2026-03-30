@@ -90,7 +90,10 @@ class MWHAWeatherCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return {
             "current": self._parse_current(data),
             "forecast": self._parse_forecast(data.get("daily", {})),
-            "forecast_hourly": self._parse_hourly_forecast(data.get("hourly", {})),
+            "forecast_hourly": self._parse_hourly_forecast(
+                data.get("hourly", {}),
+                data.get("current", {}).get("time"),
+            ),
         }
 
     async def _fetch(
@@ -154,15 +157,21 @@ class MWHAWeatherCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return result
 
-    def _parse_hourly_forecast(self, data: dict) -> list[dict[str, Any]]:
+    def _parse_hourly_forecast(
+        self,
+        data: dict,
+        current_time: str | None,
+    ) -> list[dict[str, Any]]:
         """Parse hourly forecast response."""
         times = data.get("time", [])
         codes = data.get("weather_code", [])
         temperatures = data.get("temperature_2m", [])
         is_day_values = data.get("is_day", [])
+        start_index = self._find_hourly_start_index(times, current_time)
 
         result = []
-        for index, hour in enumerate(times[:24]):
+        for index in range(start_index, min(start_index + 24, len(times))):
+            hour = times[index]
             code = codes[index] if index < len(codes) else -1
             temperature = temperatures[index] if index < len(temperatures) else None
             is_day = is_day_values[index] == 1 if index < len(is_day_values) else True
@@ -178,6 +187,24 @@ class MWHAWeatherCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         return result
+
+    @staticmethod
+    def _find_hourly_start_index(
+        times: list[str],
+        current_time: str | None,
+    ) -> int:
+        """Return the first hourly forecast index at or after the current time."""
+        if not times or not current_time:
+            return 0
+
+        if current_time in times:
+            return times.index(current_time)
+
+        for index, value in enumerate(times):
+            if value >= current_time:
+                return index
+
+        return 0
 
     @staticmethod
     def _map_condition(weather_code: int, is_day: bool) -> str:
