@@ -6,17 +6,11 @@ const MWHA = {};
 
 MWHA.CARD_NAME = 'mw-ha-weather';
 MWHA.CARD_EDITOR_NAME = 'mw-ha-weather-editor';
-MWHA.CARD_VERSION = '0.1.0';
-
-MWHA.API_BASE_FORECAST = 'https://api.open-meteo.com/v1/forecast';
+MWHA.CARD_VERSION = '0.2.0';
 
 MWHA.DEFAULT_CONFIG = {
-  latitude: null,
-  longitude: null,
+  entity: '',
   name: '',
-  units: 'metric',
-  language: '',
-  refresh_interval: 10,
   show_current: true,
   show_forecast: true,
   show_details: true,
@@ -28,8 +22,21 @@ MWHA.DEFAULT_CONFIG = {
   forecast_days: 5,
 };
 
-MWHA.UNITS_LABELS = {
-  metric: { temp: '°C', speed: 'km/h', pressure: 'hPa' },
-  imperial: { temp: '°F', speed: 'mph', pressure: 'hPa' },
-  standard: { temp: 'K', speed: 'm/s', pressure: 'hPa' },
+// HA condition string -> icon code (day variant)
+MWHA.CONDITION_ICON = {
+  'sunny': '01d',
+  'clear-night': '01n',
+  'partlycloudy': '03d',
+  'cloudy': '04d',
+  'fog': '50d',
+  'rainy': '10d',
+  'pouring': '09d',
+  'snowy': '13d',
+  'snowy-rainy': '10d',
+  'lightning': '11d',
+  'lightning-rainy': '11d',
+  'exceptional': '03d',
+  'windy': '03d',
+  'windy-variant': '04d',
+  'hail': '09d',
 };

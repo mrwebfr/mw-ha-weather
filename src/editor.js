@@ -17,6 +17,7 @@ class MWHAWeatherEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._setupEntityPicker();
   }
 
   _render() {
@@ -39,48 +40,24 @@ class MWHAWeatherEditor extends HTMLElement {
         '.editor__switch input:checked + .slider::before { transform: translateX(18px); }' +
         '.editor__field { margin-bottom: 12px; }' +
         '.editor__field-label { font-size: 0.85em; opacity: 0.7; margin-bottom: 4px; }' +
+        '.editor__info { font-size: 0.8em; opacity: 0.5; margin-top: 4px; }' +
       '</style>' +
       '<div class="editor">' +
 
         '<div class="editor__section">' +
-          '<div class="editor__section-title">API Open-Meteo</div>' +
-          '<div class="editor__field-label">Aucune cle API n est requise pour l usage gratuit.</div>' +
+          '<div class="editor__section-title">Entite meteo</div>' +
+          '<div class="editor__field">' +
+            '<div class="editor__field-label">Entite weather (creee par l integration MWHA Weather)</div>' +
+            '<div id="entity-picker-container"></div>' +
+            '<div class="editor__info">L intervalle de mise a jour et la localisation se configurent dans l integration.</div>' +
+          '</div>' +
         '</div>' +
 
         '<div class="editor__section">' +
-          '<div class="editor__section-title">Localisation</div>' +
+          '<div class="editor__section-title">Affichage</div>' +
           '<div class="editor__field">' +
-            '<div class="editor__field-label">Nom de la ville (optionnel)</div>' +
+            '<div class="editor__field-label">Nom affiche (optionnel, remplace le nom de l entite)</div>' +
             '<input class="editor__input" type="text" id="name" value="' + (config.name || '') + '" placeholder="Ex: Paris">' +
-          '</div>' +
-          '<div class="editor__field">' +
-            '<div class="editor__field-label">Latitude (vide = localisation HA)</div>' +
-            '<input class="editor__input" type="text" id="latitude" value="' + (config.latitude || '') + '" placeholder="Ex: 48.8566">' +
-          '</div>' +
-          '<div class="editor__field">' +
-            '<div class="editor__field-label">Longitude (vide = localisation HA)</div>' +
-            '<input class="editor__input" type="text" id="longitude" value="' + (config.longitude || '') + '" placeholder="Ex: 2.3522">' +
-          '</div>' +
-        '</div>' +
-
-        '<div class="editor__section">' +
-          '<div class="editor__section-title">Options</div>' +
-          '<div class="editor__row">' +
-            '<span class="editor__label">Unites</span>' +
-            '<select class="editor__select" id="units">' +
-              '<option value="metric"' + (config.units === 'metric' ? ' selected' : '') + '>Metrique (C, km/h)</option>' +
-              '<option value="imperial"' + (config.units === 'imperial' ? ' selected' : '') + '>Imperial (F, mph)</option>' +
-              '<option value="standard"' + (config.units === 'standard' ? ' selected' : '') + '>Standard (K, m/s)</option>' +
-            '</select>' +
-          '</div>' +
-          '<div class="editor__row">' +
-            '<span class="editor__label">Rafraichissement</span>' +
-            '<select class="editor__select" id="refresh_interval">' +
-              '<option value="5"' + (config.refresh_interval === 5 ? ' selected' : '') + '>5 min</option>' +
-              '<option value="10"' + (config.refresh_interval === 10 ? ' selected' : '') + '>10 min</option>' +
-              '<option value="15"' + (config.refresh_interval === 15 ? ' selected' : '') + '>15 min</option>' +
-              '<option value="30"' + (config.refresh_interval === 30 ? ' selected' : '') + '>30 min</option>' +
-            '</select>' +
           '</div>' +
           '<div class="editor__row">' +
             '<span class="editor__label">Jours de previsions</span>' +
@@ -107,7 +84,34 @@ class MWHAWeatherEditor extends HTMLElement {
         '</div>' +
       '</div>';
 
+    this._setupEntityPicker();
     this._attachEvents();
+  }
+
+  _setupEntityPicker() {
+    var container = this.shadowRoot.getElementById('entity-picker-container');
+    if (!container || !this._hass) return;
+
+    var existing = container.querySelector('ha-entity-picker');
+    if (existing) {
+      existing.hass = this._hass;
+      existing.value = this._config.entity || '';
+      return;
+    }
+
+    var picker = document.createElement('ha-entity-picker');
+    picker.hass = this._hass;
+    picker.value = this._config.entity || '';
+    picker.includeDomains = ['weather'];
+    picker.allowCustomEntity = true;
+
+    var self = this;
+    picker.addEventListener('value-changed', function(ev) {
+      self._updateConfig('entity', ev.detail.value || '');
+    });
+
+    container.innerHTML = '';
+    container.appendChild(picker);
   }
 
   _switchRow(id, label, checked) {
@@ -125,32 +129,19 @@ class MWHAWeatherEditor extends HTMLElement {
     var self = this;
     var shadow = this.shadowRoot;
 
-    ['name', 'latitude', 'longitude'].forEach(function(id) {
-      var el = shadow.getElementById(id);
-      if (el) {
-        el.addEventListener('change', function() {
-          self._updateConfig(id, el.value || '');
-        });
-      }
-    });
+    var nameEl = shadow.getElementById('name');
+    if (nameEl) {
+      nameEl.addEventListener('change', function() {
+        self._updateConfig('name', nameEl.value || '');
+      });
+    }
 
-    ['units'].forEach(function(id) {
-      var el = shadow.getElementById(id);
-      if (el) {
-        el.addEventListener('change', function() {
-          self._updateConfig(id, el.value);
-        });
-      }
-    });
-
-    ['refresh_interval', 'forecast_days'].forEach(function(id) {
-      var el = shadow.getElementById(id);
-      if (el) {
-        el.addEventListener('change', function() {
-          self._updateConfig(id, parseInt(el.value, 10));
-        });
-      }
-    });
+    var forecastEl = shadow.getElementById('forecast_days');
+    if (forecastEl) {
+      forecastEl.addEventListener('change', function() {
+        self._updateConfig('forecast_days', parseInt(forecastEl.value, 10));
+      });
+    }
 
     ['show_current', 'show_forecast', 'show_details', 'show_humidity',
      'show_pressure', 'show_wind', 'show_visibility', 'show_feels_like'
@@ -166,12 +157,7 @@ class MWHAWeatherEditor extends HTMLElement {
 
   _updateConfig(key, value) {
     this._config = Object.assign({}, this._config);
-
-    if (key === 'latitude' || key === 'longitude') {
-      this._config[key] = value ? parseFloat(value) : null;
-    } else {
-      this._config[key] = value;
-    }
+    this._config[key] = value;
 
     var event = new CustomEvent('config-changed', {
       detail: { config: this._config },

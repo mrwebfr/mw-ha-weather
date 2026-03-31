@@ -1,5 +1,5 @@
 // ============================================================
-// MWHA Weather â€” Main Card
+// MWHA Weather — Main Card
 // ============================================================
 
 class MWHAWeatherCard extends HTMLElement {
@@ -9,8 +9,11 @@ class MWHAWeatherCard extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._data = null;
-    this._refreshTimer = null;
-    this._lastFetch = 0;
+    this._forecast = [];
+    this._connected = false;
+    this._unsubForecast = null;
+    this._subscribedEntity = null;
+    this._lastStateJSON = null;
   }
 
   // -- HA Interface ------------------------------------------
@@ -20,36 +23,21 @@ class MWHAWeatherCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return {
-      show_current: true,
-      show_forecast: true,
-      show_details: true,
-    };
+    return { entity: '', show_current: true, show_forecast: true, show_details: true };
   }
 
   setConfig(config) {
     this._config = Object.assign({}, MWHA.DEFAULT_CONFIG, config);
-    if (this.shadowRoot) {
-      this._render();
+    if (this._hass) {
+      this._updateFromEntity();
     }
+    this._trySubscribeForecast();
   }
 
   set hass(hass) {
-    const prevHass = this._hass;
     this._hass = hass;
-
-    if (this._config.latitude == null && hass.config) {
-      this._config.latitude = hass.config.latitude;
-      this._config.longitude = hass.config.longitude;
-    }
-
-    if (!this._config.language && hass.language) {
-      this._config.language = hass.language;
-    }
-
-    if (!prevHass) {
-      this._fetchWeather();
-    }
+    this._updateFromEntity();
+    this._trySubscribeForecast();
   }
 
   getCardSize() {
@@ -59,67 +47,115 @@ class MWHAWeatherCard extends HTMLElement {
   // -- Lifecycle ---------------------------------------------
 
   connectedCallback() {
-    this._fetchWeather();
-    this._startRefreshTimer();
+    this._connected = true;
+    this._trySubscribeForecast();
   }
 
   disconnectedCallback() {
-    this._stopRefreshTimer();
+    this._connected = false;
+    this._unsubscribeForecast();
   }
 
-  // -- Timer -------------------------------------------------
+  // -- Forecast subscription ---------------------------------
 
-  _startRefreshTimer() {
-    this._stopRefreshTimer();
-    const interval = (this._config.refresh_interval || 10) * 60 * 1000;
-    this._refreshTimer = setInterval(() => this._fetchWeather(), interval);
-  }
+  async _trySubscribeForecast() {
+    if (!this._connected || !this._hass || !this._config.entity) return;
+    if (this._subscribedEntity === this._config.entity) return;
 
-  _stopRefreshTimer() {
-    if (this._refreshTimer) {
-      clearInterval(this._refreshTimer);
-      this._refreshTimer = null;
-    }
-  }
-
-  // -- Data --------------------------------------------------
-
-  async _fetchWeather() {
-    if (this._config.latitude == null || this._config.longitude == null) {
-      this._render();
-      return;
-    }
-
-    const now = Date.now();
-    const cacheMs = (this._config.refresh_interval || 10) * 60 * 1000;
-    if (this._data && (now - this._lastFetch) < cacheMs) {
-      return;
-    }
+    this._unsubscribeForecast();
 
     try {
-      this._data = await MWHA.Api.fetch(
-        this._config.latitude,
-        this._config.longitude,
-        this._config.units || 'metric',
-        this._config.language || 'fr'
+      this._unsubForecast = await this._hass.connection.subscribeMessage(
+        function(msg) {
+          this._forecast = msg.forecast || [];
+          this._render();
+        }.bind(this),
+        {
+          type: 'weather/subscribe_forecast',
+          forecast_type: 'daily',
+          entity_id: this._config.entity,
+        }
       );
-      this._lastFetch = now;
-      this._render();
+      this._subscribedEntity = this._config.entity;
     } catch (err) {
-      console.error('MWHA Weather:', err);
-      this._renderError(err.message);
+      console.error('MWHA Weather: forecast subscription error', err);
     }
+  }
+
+  _unsubscribeForecast() {
+    if (this._unsubForecast) {
+      this._unsubForecast();
+      this._unsubForecast = null;
+    }
+    this._subscribedEntity = null;
+  }
+
+  // -- Data from HA entity -----------------------------------
+
+  _updateFromEntity() {
+    if (!this._hass || !this._config.entity) {
+      this._render();
+      return;
+    }
+
+    var entity = this._hass.states[this._config.entity];
+    if (!entity) {
+      this._data = null;
+      this._render();
+      return;
+    }
+
+    var stateJSON = JSON.stringify(entity);
+    if (stateJSON === this._lastStateJSON) return;
+    this._lastStateJSON = stateJSON;
+
+    var attrs = entity.attributes;
+    var lang = (this._hass.language || 'fr').slice(0, 2);
+    var weatherCode = attrs.mwha_weather_code;
+    var isDay = attrs.mwha_is_day !== false;
+
+    var description;
+    var icon;
+    if (weatherCode != null) {
+      description = MWHA.Utils.weatherCodeToDescription(weatherCode, lang);
+      icon = MWHA.Utils.weatherCodeToIcon(weatherCode, isDay);
+    } else {
+      description = MWHA.Utils.conditionToDescription(entity.state, lang);
+      icon = MWHA.Utils.conditionToIcon(entity.state, isDay);
+    }
+
+    this._data = {
+      current: {
+        temp: attrs.temperature,
+        feels_like: attrs.mwha_feels_like,
+        humidity: attrs.humidity,
+        pressure: attrs.pressure,
+        visibility: attrs.mwha_visibility_m,
+        wind_speed: attrs.wind_speed,
+        wind_deg: attrs.wind_bearing,
+        description: description,
+        icon: icon,
+        name: this._config.name || attrs.friendly_name || '',
+      },
+      units: {
+        temp: attrs.temperature_unit || '\u00b0C',
+        speed: attrs.wind_speed_unit || 'km/h',
+        pressure: attrs.pressure_unit || 'hPa',
+      },
+    };
+
+    this._render();
   }
 
   // -- Render ------------------------------------------------
 
   _render() {
-    if (this._config.latitude == null || this._config.longitude == null) {
+    if (!this._config.entity) {
       this.shadowRoot.innerHTML = MWHA.Styles.getAll() +
         '<ha-card>' +
         '<div class="mwha-error">' +
         '<div class="mwha-error__title">Configuration requise</div>' +
-        '<div class="mwha-error__message">Ajoutez une latitude et une longitude ou utilisez la localisation Home Assistant.</div>' +
+        '<div class="mwha-error__message">Selectionnez une entite meteo dans la configuration de la carte.</div>' +
         '</div>' +
         '</ha-card>';
       return;
@@ -133,8 +169,8 @@ class MWHAWeatherCard extends HTMLElement {
       return;
     }
 
-    const parts = [MWHA.Styles.getAll(), '<ha-card>'];
-    const cityName = this._config.name || this._data.current.name || '';
+    var parts = [MWHA.Styles.getAll(), '<ha-card>'];
+    var cityName = this._config.name || this._data.current.name || '';
 
     if (cityName) {
       parts.push(
@@ -144,30 +180,23 @@ class MWHAWeatherCard extends HTMLElement {
       );
     }
 
+    var units = this._data.units;
+
     if (this._config.show_current !== false) {
-      parts.push(MWHA.Templates.current(this._data.current, this._config));
+      parts.push(MWHA.Templates.current(this._data.current, this._config, units));
     }
 
     if (this._config.show_details !== false) {
-      parts.push(MWHA.Templates.details(this._data.current, this._config));
+      parts.push(MWHA.Templates.details(this._data.current, this._config, units));
     }
 
-    if (this._config.show_forecast !== false) {
-      parts.push(MWHA.Templates.forecast(this._data.forecast, this._config));
+    if (this._config.show_forecast !== false && this._forecast.length > 0) {
+      var lang = (this._hass && this._hass.language) ? this._hass.language : 'fr';
+      parts.push(MWHA.Templates.forecast(this._forecast, this._config, lang));
     }
 
     parts.push('</ha-card>');
     this.shadowRoot.innerHTML = parts.join('');
-  }
-
-  _renderError(message) {
-    this.shadowRoot.innerHTML = MWHA.Styles.getAll() +
-      '<ha-card>' +
-      '<div class="mwha-error">' +
-      '<div class="mwha-error__title">Erreur</div>' +
-      '<div class="mwha-error__message">' + message + '</div>' +
-      '</div>' +
-      '</ha-card>';
   }
 }
 

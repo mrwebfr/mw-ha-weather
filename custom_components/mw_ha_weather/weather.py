@@ -103,7 +103,7 @@ class MWHAWeatherEntity(CoordinatorEntity[MWHAWeatherCoordinator], WeatherEntity
         return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, str | int | bool | None]:
+    def extra_state_attributes(self) -> dict[str, str | int | float | bool | None]:
         """Expose raw API values for easier debugging in Home Assistant."""
         if not self.coordinator.data:
             return {}
@@ -114,6 +114,8 @@ class MWHAWeatherEntity(CoordinatorEntity[MWHAWeatherCoordinator], WeatherEntity
             "mwha_is_day": current.get("is_day"),
             "mwha_description": current.get("description"),
             "mwha_condition": current.get("condition"),
+            "mwha_feels_like": current.get("feels_like"),
+            "mwha_visibility_m": current.get("visibility"),
         }
 
     @property

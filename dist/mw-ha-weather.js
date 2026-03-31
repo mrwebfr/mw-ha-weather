@@ -10,17 +10,11 @@ const MWHA = {};
 
 MWHA.CARD_NAME = 'mw-ha-weather';
 MWHA.CARD_EDITOR_NAME = 'mw-ha-weather-editor';
-MWHA.CARD_VERSION = '0.1.0';
-
-MWHA.API_BASE_FORECAST = 'https://api.open-meteo.com/v1/forecast';
+MWHA.CARD_VERSION = '0.2.0';
 
 MWHA.DEFAULT_CONFIG = {
-  latitude: null,
-  longitude: null,
+  entity: '',
   name: '',
-  units: 'metric',
-  language: '',
-  refresh_interval: 10,
   show_current: true,
   show_forecast: true,
   show_details: true,
@@ -32,10 +26,23 @@ MWHA.DEFAULT_CONFIG = {
   forecast_days: 5,
 };
 
-MWHA.UNITS_LABELS = {
-  metric: { temp: '°C', speed: 'km/h', pressure: 'hPa' },
-  imperial: { temp: '°F', speed: 'mph', pressure: 'hPa' },
-  standard: { temp: 'K', speed: 'm/s', pressure: 'hPa' },
+// HA condition string -> icon code (day variant)
+MWHA.CONDITION_ICON = {
+  'sunny': '01d',
+  'clear-night': '01n',
+  'partlycloudy': '03d',
+  'cloudy': '04d',
+  'fog': '50d',
+  'rainy': '10d',
+  'pouring': '09d',
+  'snowy': '13d',
+  'snowy-rainy': '10d',
+  'lightning': '11d',
+  'lightning-rainy': '11d',
+  'exceptional': '03d',
+  'windy': '03d',
+  'windy-variant': '04d',
+  'hail': '09d',
 };
 
 
@@ -45,26 +52,24 @@ MWHA.UNITS_LABELS = {
 // ============================================================
 
 MWHA.Utils = {
-  formatTemp(value, units) {
+  formatTemp(value, unit) {
     if (value == null) return '--';
-    const label = MWHA.UNITS_LABELS[units || 'metric'];
-    return Math.round(value) + label.temp;
+    return Math.round(value) + (unit || '\u00b0C');
   },
 
-  formatSpeed(value, units) {
+  formatSpeed(value, unit) {
     if (value == null) return '--';
-    const label = MWHA.UNITS_LABELS[units || 'metric'];
-    return Math.round(value) + ' ' + label.speed;
+    return Math.round(value) + ' ' + (unit || 'km/h');
   },
 
-  formatPressure(value) {
+  formatPressure(value, unit) {
     if (value == null) return '--';
-    return value + ' hPa';
+    return Math.round(value) + ' ' + (unit || 'hPa');
   },
 
   formatPercent(value) {
     if (value == null) return '--';
-    return value + '%';
+    return Math.round(value) + '%';
   },
 
   formatVisibility(value) {
@@ -72,19 +77,153 @@ MWHA.Utils = {
     if (value >= 1000) {
       return (value / 1000).toFixed(1) + ' km';
     }
-    return value + ' m';
+    return Math.round(value) + ' m';
   },
 
-  formatDayName(timestamp, lang) {
-    const date = new Date(timestamp * 1000);
+  formatDayName(isoString, lang) {
+    var date = new Date(isoString);
+    if (isNaN(date.getTime())) return '--';
     return date.toLocaleDateString(lang || 'fr', { weekday: 'short' });
   },
 
   windDirection(degrees) {
     if (degrees == null) return '';
-    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
-    const index = Math.round(degrees / 45) % 8;
+    var directions = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
+    var index = Math.round(degrees / 45) % 8;
     return directions[index];
+  },
+
+  // WMO weather code -> icon code
+  weatherCodeToIcon(code, isDay) {
+    var suffix = isDay ? 'd' : 'n';
+    if (code === 0) return '01' + suffix;
+    if (code === 1) return '02' + suffix;
+    if (code === 2) return '03' + suffix;
+    if (code === 3) return '04' + suffix;
+    if (code === 45 || code === 48) return '50' + suffix;
+    if ((code >= 51 && code <= 57) || (code >= 80 && code <= 82)) return '09' + suffix;
+    if (code >= 61 && code <= 67) return '10' + suffix;
+    if ((code >= 71 && code <= 77) || code === 85 || code === 86) return '13' + suffix;
+    if (code >= 95) return '11' + suffix;
+    return '03' + suffix;
+  },
+
+  // HA condition string -> icon code
+  conditionToIcon(condition, isDay) {
+    if (!isDay && condition === 'sunny') return '01n';
+    if (!isDay && condition === 'partlycloudy') return '02n';
+    var icon = MWHA.CONDITION_ICON[condition];
+    if (icon) {
+      if (!isDay && icon.endsWith('d')) {
+        return icon.slice(0, -1) + 'n';
+      }
+      return icon;
+    }
+    return isDay ? '03d' : '03n';
+  },
+
+  // WMO weather code -> description
+  weatherCodeToDescription(code, lang) {
+    var locale = (lang || 'fr').toLowerCase().slice(0, 2);
+    var descriptions = locale === 'fr' ? {
+      0: 'Ciel degage',
+      1: 'Principalement degage',
+      2: 'Partiellement nuageux',
+      3: 'Couvert',
+      45: 'Brouillard',
+      48: 'Brouillard givrant',
+      51: 'Bruine legere',
+      53: 'Bruine moderee',
+      55: 'Bruine dense',
+      56: 'Bruine verglacante legere',
+      57: 'Bruine verglacante dense',
+      61: 'Pluie legere',
+      63: 'Pluie moderee',
+      65: 'Pluie forte',
+      66: 'Pluie verglacante legere',
+      67: 'Pluie verglacante forte',
+      71: 'Neige legere',
+      73: 'Neige moderee',
+      75: 'Neige forte',
+      77: 'Grains de neige',
+      80: 'Averses legeres',
+      81: 'Averses moderees',
+      82: 'Averses violentes',
+      85: 'Averses de neige legeres',
+      86: 'Averses de neige fortes',
+      95: 'Orage',
+      96: 'Orage avec grele legere',
+      99: 'Orage avec grele forte',
+    } : {
+      0: 'Clear sky',
+      1: 'Mainly clear',
+      2: 'Partly cloudy',
+      3: 'Overcast',
+      45: 'Fog',
+      48: 'Rime fog',
+      51: 'Light drizzle',
+      53: 'Moderate drizzle',
+      55: 'Dense drizzle',
+      56: 'Light freezing drizzle',
+      57: 'Dense freezing drizzle',
+      61: 'Light rain',
+      63: 'Moderate rain',
+      65: 'Heavy rain',
+      66: 'Light freezing rain',
+      67: 'Heavy freezing rain',
+      71: 'Light snow',
+      73: 'Moderate snow',
+      75: 'Heavy snow',
+      77: 'Snow grains',
+      80: 'Light rain showers',
+      81: 'Moderate rain showers',
+      82: 'Violent rain showers',
+      85: 'Light snow showers',
+      86: 'Heavy snow showers',
+      95: 'Thunderstorm',
+      96: 'Thunderstorm with light hail',
+      99: 'Thunderstorm with heavy hail',
+    };
+    return descriptions[code] || (locale === 'fr' ? 'Conditions inconnues' : 'Unknown conditions');
+  },
+
+  // HA condition string -> description
+  conditionToDescription(condition, lang) {
+    var locale = (lang || 'fr').toLowerCase().slice(0, 2);
+    var descriptions = locale === 'fr' ? {
+      'sunny': 'Ensoleille',
+      'clear-night': 'Nuit degagee',
+      'partlycloudy': 'Partiellement nuageux',
+      'cloudy': 'Couvert',
+      'fog': 'Brouillard',
+      'rainy': 'Pluie',
+      'pouring': 'Fortes pluies',
+      'snowy': 'Neige',
+      'snowy-rainy': 'Pluie et neige',
+      'lightning': 'Orage',
+      'lightning-rainy': 'Orage pluvieux',
+      'exceptional': 'Exceptionnel',
+      'windy': 'Venteux',
+      'windy-variant': 'Venteux et nuageux',
+      'hail': 'Grele',
+    } : {
+      'sunny': 'Sunny',
+      'clear-night': 'Clear night',
+      'partlycloudy': 'Partly cloudy',
+      'cloudy': 'Cloudy',
+      'fog': 'Fog',
+      'rainy': 'Rainy',
+      'pouring': 'Pouring',
+      'snowy': 'Snowy',
+      'snowy-rainy': 'Sleet',
+      'lightning': 'Lightning',
+      'lightning-rainy': 'Thunderstorm',
+      'exceptional': 'Exceptional',
+      'windy': 'Windy',
+      'windy-variant': 'Windy and cloudy',
+      'hail': 'Hail',
+    };
+    return descriptions[condition] || condition || '--';
   },
 };
 
@@ -322,277 +461,39 @@ MWHA.Styles = {
 };
 
 
-// --- api.js ---
-// ============================================================
-// MWHA Weather - API Client
-// ============================================================
-
-MWHA.Api = {
-  _cache: new Map(),
-
-  async fetch(lat, lon, units, lang) {
-    const cacheKey = [lat, lon, units || 'metric', lang || 'fr'].join(',');
-    const cached = this._cache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp) < 5 * 60 * 1000) {
-      return cached.data;
-    }
-
-    const unitParams = this._getUnitParams(units);
-    const params = new URLSearchParams({
-      latitude: lat,
-      longitude: lon,
-      timezone: 'auto',
-      forecast_days: '14',
-      current: [
-        'temperature_2m',
-        'apparent_temperature',
-        'relative_humidity_2m',
-        'pressure_msl',
-        'visibility',
-        'wind_speed_10m',
-        'wind_direction_10m',
-        'weather_code',
-        'is_day',
-      ].join(','),
-      hourly: [
-        'temperature_2m',
-        'relative_humidity_2m',
-        'pressure_msl',
-        'wind_speed_10m',
-        'visibility',
-      ].join(','),
-      daily: [
-        'weather_code',
-        'temperature_2m_max',
-        'temperature_2m_min',
-      ].join(','),
-      temperature_unit: unitParams.temperature_unit,
-      wind_speed_unit: unitParams.wind_speed_unit,
-    });
-
-    const response = await fetch(MWHA.API_BASE_FORECAST + '?' + params.toString());
-
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw new Error('Limite d appels API depassee. Reessayez plus tard.');
-      }
-      throw new Error('Erreur API (' + response.status + ')');
-    }
-
-    const data = await response.json();
-    const current = data.current || {};
-    const currentCode = current.weather_code;
-    const isDay = current.is_day !== 0;
-
-    const result = {
-      current: {
-        temp: this._normalizeTemperature(current.temperature_2m, units),
-        feels_like: this._normalizeTemperature(current.apparent_temperature, units),
-        humidity: current.relative_humidity_2m,
-        pressure: current.pressure_msl,
-        visibility: current.visibility != null
-          ? current.visibility
-          : this._findCurrentVisibility(data),
-        wind_speed: current.wind_speed_10m,
-        wind_deg: current.wind_direction_10m,
-        description: this._getWeatherDescription(currentCode, lang),
-        icon: this._getIconCode(currentCode, isDay),
-        name: '',
-      },
-      forecast: this._parseDailyForecast(data.daily, lang, units),
-      trend: this._parseTrendData(data.hourly, units),
-    };
-
-    this._cache.set(cacheKey, { data: result, timestamp: Date.now() });
-    return result;
-  },
-
-  _getUnitParams(units) {
-    if (units === 'imperial') {
-      return { temperature_unit: 'fahrenheit', wind_speed_unit: 'mph' };
-    }
-    if (units === 'standard') {
-      return { temperature_unit: 'celsius', wind_speed_unit: 'ms' };
-    }
-    return { temperature_unit: 'celsius', wind_speed_unit: 'kmh' };
-  },
-
-  _findCurrentVisibility(data) {
-    if (!data || !data.current || !data.current.time) return null;
-
-    const hourly = data.hourly || {};
-    if (!hourly.time || !hourly.visibility) return null;
-
-    const index = hourly.time.indexOf(data.current.time);
-    return index === -1 ? null : hourly.visibility[index];
-  },
-
-  _parseDailyForecast(dailyData, lang, units) {
-    if (!dailyData || !dailyData.time) return [];
-
-    return dailyData.time.map((date, index) => {
-      const code = dailyData.weather_code ? dailyData.weather_code[index] : 3;
-
-      return {
-        dt: Math.floor(new Date(date + 'T12:00:00').getTime() / 1000),
-        temp_min: dailyData.temperature_2m_min
-          ? this._normalizeTemperature(dailyData.temperature_2m_min[index], units)
-          : null,
-        temp_max: dailyData.temperature_2m_max
-          ? this._normalizeTemperature(dailyData.temperature_2m_max[index], units)
-          : null,
-        icon: this._getIconCode(code, true),
-        description: this._getWeatherDescription(code, lang),
-      };
-    });
-  },
-
-  _parseTrendData(hourlyData, units) {
-    if (!hourlyData || !hourlyData.time) return null;
-
-    return {
-      hourly: hourlyData.time.map((time, index) => {
-        return {
-          time: time,
-          temp: hourlyData.temperature_2m
-            ? this._normalizeTemperature(hourlyData.temperature_2m[index], units)
-            : null,
-          humidity: hourlyData.relative_humidity_2m
-            ? hourlyData.relative_humidity_2m[index]
-            : null,
-          pressure: hourlyData.pressure_msl ? hourlyData.pressure_msl[index] : null,
-          wind_speed: hourlyData.wind_speed_10m ? hourlyData.wind_speed_10m[index] : null,
-          visibility: hourlyData.visibility ? hourlyData.visibility[index] : null,
-        };
-      }),
-    };
-  },
-
-  _normalizeTemperature(value, units) {
-    if (value == null) return null;
-    return units === 'standard' ? value + 273.15 : value;
-  },
-
-  _getIconCode(code, isDay) {
-    const suffix = isDay ? 'd' : 'n';
-
-    if (code === 0) return '01' + suffix;
-    if (code === 1) return '02' + suffix;
-    if (code === 2) return '03' + suffix;
-    if (code === 3) return '04' + suffix;
-    if (code === 45 || code === 48) return '50' + suffix;
-    if ((code >= 51 && code <= 57) || (code >= 80 && code <= 82)) return '09' + suffix;
-    if (code >= 61 && code <= 67) return '10' + suffix;
-    if ((code >= 71 && code <= 77) || code === 85 || code === 86) return '13' + suffix;
-    if (code >= 95) return '11' + suffix;
-    return '03' + suffix;
-  },
-
-  _getWeatherDescription(code, lang) {
-    const locale = (lang || 'fr').toLowerCase().slice(0, 2);
-    const descriptions = locale === 'fr' ? {
-      0: 'Ciel degage',
-      1: 'Principalement degage',
-      2: 'Partiellement nuageux',
-      3: 'Couvert',
-      45: 'Brouillard',
-      48: 'Brouillard givrant',
-      51: 'Bruine legere',
-      53: 'Bruine moderee',
-      55: 'Bruine dense',
-      56: 'Bruine verglacante legere',
-      57: 'Bruine verglacante dense',
-      61: 'Pluie legere',
-      63: 'Pluie moderee',
-      65: 'Pluie forte',
-      66: 'Pluie verglacante legere',
-      67: 'Pluie verglacante forte',
-      71: 'Neige legere',
-      73: 'Neige moderee',
-      75: 'Neige forte',
-      77: 'Grains de neige',
-      80: 'Averses legeres',
-      81: 'Averses moderees',
-      82: 'Averses violentes',
-      85: 'Averses de neige legeres',
-      86: 'Averses de neige fortes',
-      95: 'Orage',
-      96: 'Orage avec grele legere',
-      99: 'Orage avec grele forte',
-    } : {
-      0: 'Clear sky',
-      1: 'Mainly clear',
-      2: 'Partly cloudy',
-      3: 'Overcast',
-      45: 'Fog',
-      48: 'Rime fog',
-      51: 'Light drizzle',
-      53: 'Moderate drizzle',
-      55: 'Dense drizzle',
-      56: 'Light freezing drizzle',
-      57: 'Dense freezing drizzle',
-      61: 'Light rain',
-      63: 'Moderate rain',
-      65: 'Heavy rain',
-      66: 'Light freezing rain',
-      67: 'Heavy freezing rain',
-      71: 'Light snow',
-      73: 'Moderate snow',
-      75: 'Heavy snow',
-      77: 'Snow grains',
-      80: 'Light rain showers',
-      81: 'Moderate rain showers',
-      82: 'Violent rain showers',
-      85: 'Light snow showers',
-      86: 'Heavy snow showers',
-      95: 'Thunderstorm',
-      96: 'Thunderstorm with light hail',
-      99: 'Thunderstorm with heavy hail',
-    };
-
-    return descriptions[code] || (locale === 'fr' ? 'Conditions inconnues' : 'Unknown conditions');
-  },
-
-  clearCache() {
-    this._cache.clear();
-  },
-};
-
-
 // --- templates.js ---
 // ============================================================
 // MWHA Weather - HTML Templates
 // ============================================================
 
 MWHA.Templates = {
-  current(data, config) {
-    var units = config.units || 'metric';
+  current(data, config, units) {
     return '' +
       '<div class="mwha-current">' +
         '<div class="mwha-current__icon">' + MWHA.Icons.get(data.icon) + '</div>' +
         '<div class="mwha-current__info">' +
-          '<div class="mwha-current__temp">' + MWHA.Utils.formatTemp(data.temp, units) + '</div>' +
+          '<div class="mwha-current__temp">' + MWHA.Utils.formatTemp(data.temp, units.temp) + '</div>' +
           '<div class="mwha-current__desc">' + data.description + '</div>' +
           (config.show_feels_like !== false
-            ? '<div class="mwha-current__feels">Ressenti ' + MWHA.Utils.formatTemp(data.feels_like, units) + '</div>'
+            ? '<div class="mwha-current__feels">Ressenti ' + MWHA.Utils.formatTemp(data.feels_like, units.temp) + '</div>'
             : '') +
         '</div>' +
       '</div>';
   },
 
-  details(data, config) {
+  details(data, config, units) {
     var items = [];
 
     if (config.show_humidity !== false) {
       items.push(this._detailItem('humidity', MWHA.Utils.formatPercent(data.humidity), 'Humidite'));
     }
     if (config.show_wind !== false) {
-      var windText = MWHA.Utils.formatSpeed(data.wind_speed, config.units);
+      var windText = MWHA.Utils.formatSpeed(data.wind_speed, units.speed);
       var dir = MWHA.Utils.windDirection(data.wind_deg);
       items.push(this._detailItem('wind', windText + (dir ? ' ' + dir : ''), 'Vent'));
     }
     if (config.show_pressure !== false) {
-      items.push(this._detailItem('pressure', MWHA.Utils.formatPressure(data.pressure), 'Pression'));
+      items.push(this._detailItem('pressure', MWHA.Utils.formatPressure(data.pressure, units.pressure), 'Pression'));
     }
     if (config.show_visibility !== false) {
       items.push(this._detailItem('visibility', MWHA.Utils.formatVisibility(data.visibility), 'Visibilite'));
@@ -612,20 +513,24 @@ MWHA.Templates = {
       '</div>';
   },
 
-  forecast(forecastData, config) {
+  forecast(forecastData, config, lang) {
     if (!forecastData || forecastData.length === 0) return '';
 
-    var days = forecastData.slice(1, (config.forecast_days || 5) + 1);
-    var units = config.units || 'metric';
-    var lang = config.language || 'fr';
+    var days = forecastData.slice(0, config.forecast_days || 5);
+    var locale = lang || 'fr';
 
     var items = days.map(function(day) {
+      var icon = MWHA.Utils.conditionToIcon(day.condition, true);
+      var description = MWHA.Utils.conditionToDescription(day.condition, locale);
+      var tempHigh = day.temperature != null ? day.temperature : day.native_temperature;
+      var tempLow = day.templow != null ? day.templow : day.native_templow;
+
       return '' +
         '<div class="mwha-forecast__day">' +
-          '<div class="mwha-forecast__day-name">' + MWHA.Utils.formatDayName(day.dt, lang) + '</div>' +
-          '<div class="mwha-forecast__icon">' + MWHA.Icons.get(day.icon) + '</div>' +
-          '<div class="mwha-forecast__temp-high">' + MWHA.Utils.formatTemp(day.temp_max, units) + '</div>' +
-          '<div class="mwha-forecast__temp-low">' + MWHA.Utils.formatTemp(day.temp_min, units) + '</div>' +
+          '<div class="mwha-forecast__day-name">' + MWHA.Utils.formatDayName(day.datetime, locale) + '</div>' +
+          '<div class="mwha-forecast__icon">' + MWHA.Icons.get(icon) + '</div>' +
+          '<div class="mwha-forecast__temp-high">' + MWHA.Utils.formatTemp(tempHigh) + '</div>' +
+          '<div class="mwha-forecast__temp-low">' + MWHA.Utils.formatTemp(tempLow) + '</div>' +
         '</div>';
     });
 
@@ -666,6 +571,7 @@ class MWHAWeatherEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._setupEntityPicker();
   }
 
   _render() {
@@ -688,48 +594,24 @@ class MWHAWeatherEditor extends HTMLElement {
         '.editor__switch input:checked + .slider::before { transform: translateX(18px); }' +
         '.editor__field { margin-bottom: 12px; }' +
         '.editor__field-label { font-size: 0.85em; opacity: 0.7; margin-bottom: 4px; }' +
+        '.editor__info { font-size: 0.8em; opacity: 0.5; margin-top: 4px; }' +
       '</style>' +
       '<div class="editor">' +
 
         '<div class="editor__section">' +
-          '<div class="editor__section-title">API Open-Meteo</div>' +
-          '<div class="editor__field-label">Aucune cle API n est requise pour l usage gratuit.</div>' +
+          '<div class="editor__section-title">Entite meteo</div>' +
+          '<div class="editor__field">' +
+            '<div class="editor__field-label">Entite weather (creee par l integration MWHA Weather)</div>' +
+            '<div id="entity-picker-container"></div>' +
+            '<div class="editor__info">L intervalle de mise a jour et la localisation se configurent dans l integration.</div>' +
+          '</div>' +
         '</div>' +
 
         '<div class="editor__section">' +
-          '<div class="editor__section-title">Localisation</div>' +
+          '<div class="editor__section-title">Affichage</div>' +
           '<div class="editor__field">' +
-            '<div class="editor__field-label">Nom de la ville (optionnel)</div>' +
+            '<div class="editor__field-label">Nom affiche (optionnel, remplace le nom de l entite)</div>' +
             '<input class="editor__input" type="text" id="name" value="' + (config.name || '') + '" placeholder="Ex: Paris">' +
-          '</div>' +
-          '<div class="editor__field">' +
-            '<div class="editor__field-label">Latitude (vide = localisation HA)</div>' +
-            '<input class="editor__input" type="text" id="latitude" value="' + (config.latitude || '') + '" placeholder="Ex: 48.8566">' +
-          '</div>' +
-          '<div class="editor__field">' +
-            '<div class="editor__field-label">Longitude (vide = localisation HA)</div>' +
-            '<input class="editor__input" type="text" id="longitude" value="' + (config.longitude || '') + '" placeholder="Ex: 2.3522">' +
-          '</div>' +
-        '</div>' +
-
-        '<div class="editor__section">' +
-          '<div class="editor__section-title">Options</div>' +
-          '<div class="editor__row">' +
-            '<span class="editor__label">Unites</span>' +
-            '<select class="editor__select" id="units">' +
-              '<option value="metric"' + (config.units === 'metric' ? ' selected' : '') + '>Metrique (C, km/h)</option>' +
-              '<option value="imperial"' + (config.units === 'imperial' ? ' selected' : '') + '>Imperial (F, mph)</option>' +
-              '<option value="standard"' + (config.units === 'standard' ? ' selected' : '') + '>Standard (K, m/s)</option>' +
-            '</select>' +
-          '</div>' +
-          '<div class="editor__row">' +
-            '<span class="editor__label">Rafraichissement</span>' +
-            '<select class="editor__select" id="refresh_interval">' +
-              '<option value="5"' + (config.refresh_interval === 5 ? ' selected' : '') + '>5 min</option>' +
-              '<option value="10"' + (config.refresh_interval === 10 ? ' selected' : '') + '>10 min</option>' +
-              '<option value="15"' + (config.refresh_interval === 15 ? ' selected' : '') + '>15 min</option>' +
-              '<option value="30"' + (config.refresh_interval === 30 ? ' selected' : '') + '>30 min</option>' +
-            '</select>' +
           '</div>' +
           '<div class="editor__row">' +
             '<span class="editor__label">Jours de previsions</span>' +
@@ -756,7 +638,34 @@ class MWHAWeatherEditor extends HTMLElement {
         '</div>' +
       '</div>';
 
+    this._setupEntityPicker();
     this._attachEvents();
+  }
+
+  _setupEntityPicker() {
+    var container = this.shadowRoot.getElementById('entity-picker-container');
+    if (!container || !this._hass) return;
+
+    var existing = container.querySelector('ha-entity-picker');
+    if (existing) {
+      existing.hass = this._hass;
+      existing.value = this._config.entity || '';
+      return;
+    }
+
+    var picker = document.createElement('ha-entity-picker');
+    picker.hass = this._hass;
+    picker.value = this._config.entity || '';
+    picker.includeDomains = ['weather'];
+    picker.allowCustomEntity = true;
+
+    var self = this;
+    picker.addEventListener('value-changed', function(ev) {
+      self._updateConfig('entity', ev.detail.value || '');
+    });
+
+    container.innerHTML = '';
+    container.appendChild(picker);
   }
 
   _switchRow(id, label, checked) {
@@ -774,32 +683,19 @@ class MWHAWeatherEditor extends HTMLElement {
     var self = this;
     var shadow = this.shadowRoot;
 
-    ['name', 'latitude', 'longitude'].forEach(function(id) {
-      var el = shadow.getElementById(id);
-      if (el) {
-        el.addEventListener('change', function() {
-          self._updateConfig(id, el.value || '');
-        });
-      }
-    });
+    var nameEl = shadow.getElementById('name');
+    if (nameEl) {
+      nameEl.addEventListener('change', function() {
+        self._updateConfig('name', nameEl.value || '');
+      });
+    }
 
-    ['units'].forEach(function(id) {
-      var el = shadow.getElementById(id);
-      if (el) {
-        el.addEventListener('change', function() {
-          self._updateConfig(id, el.value);
-        });
-      }
-    });
-
-    ['refresh_interval', 'forecast_days'].forEach(function(id) {
-      var el = shadow.getElementById(id);
-      if (el) {
-        el.addEventListener('change', function() {
-          self._updateConfig(id, parseInt(el.value, 10));
-        });
-      }
-    });
+    var forecastEl = shadow.getElementById('forecast_days');
+    if (forecastEl) {
+      forecastEl.addEventListener('change', function() {
+        self._updateConfig('forecast_days', parseInt(forecastEl.value, 10));
+      });
+    }
 
     ['show_current', 'show_forecast', 'show_details', 'show_humidity',
      'show_pressure', 'show_wind', 'show_visibility', 'show_feels_like'
@@ -815,12 +711,7 @@ class MWHAWeatherEditor extends HTMLElement {
 
   _updateConfig(key, value) {
     this._config = Object.assign({}, this._config);
-
-    if (key === 'latitude' || key === 'longitude') {
-      this._config[key] = value ? parseFloat(value) : null;
-    } else {
-      this._config[key] = value;
-    }
+    this._config[key] = value;
 
     var event = new CustomEvent('config-changed', {
       detail: { config: this._config },
@@ -836,7 +727,7 @@ customElements.define(MWHA.CARD_EDITOR_NAME, MWHAWeatherEditor);
 
 // --- card.js ---
 // ============================================================
-// MWHA Weather â€” Main Card
+// MWHA Weather — Main Card
 // ============================================================
 
 class MWHAWeatherCard extends HTMLElement {
@@ -846,8 +737,11 @@ class MWHAWeatherCard extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._data = null;
-    this._refreshTimer = null;
-    this._lastFetch = 0;
+    this._forecast = [];
+    this._connected = false;
+    this._unsubForecast = null;
+    this._subscribedEntity = null;
+    this._lastStateJSON = null;
   }
 
   // -- HA Interface ------------------------------------------
@@ -857,36 +751,21 @@ class MWHAWeatherCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return {
-      show_current: true,
-      show_forecast: true,
-      show_details: true,
-    };
+    return { entity: '', show_current: true, show_forecast: true, show_details: true };
   }
 
   setConfig(config) {
     this._config = Object.assign({}, MWHA.DEFAULT_CONFIG, config);
-    if (this.shadowRoot) {
-      this._render();
+    if (this._hass) {
+      this._updateFromEntity();
     }
+    this._trySubscribeForecast();
   }
 
   set hass(hass) {
-    const prevHass = this._hass;
     this._hass = hass;
-
-    if (this._config.latitude == null && hass.config) {
-      this._config.latitude = hass.config.latitude;
-      this._config.longitude = hass.config.longitude;
-    }
-
-    if (!this._config.language && hass.language) {
-      this._config.language = hass.language;
-    }
-
-    if (!prevHass) {
-      this._fetchWeather();
-    }
+    this._updateFromEntity();
+    this._trySubscribeForecast();
   }
 
   getCardSize() {
@@ -896,67 +775,115 @@ class MWHAWeatherCard extends HTMLElement {
   // -- Lifecycle ---------------------------------------------
 
   connectedCallback() {
-    this._fetchWeather();
-    this._startRefreshTimer();
+    this._connected = true;
+    this._trySubscribeForecast();
   }
 
   disconnectedCallback() {
-    this._stopRefreshTimer();
+    this._connected = false;
+    this._unsubscribeForecast();
   }
 
-  // -- Timer -------------------------------------------------
+  // -- Forecast subscription ---------------------------------
 
-  _startRefreshTimer() {
-    this._stopRefreshTimer();
-    const interval = (this._config.refresh_interval || 10) * 60 * 1000;
-    this._refreshTimer = setInterval(() => this._fetchWeather(), interval);
-  }
+  async _trySubscribeForecast() {
+    if (!this._connected || !this._hass || !this._config.entity) return;
+    if (this._subscribedEntity === this._config.entity) return;
 
-  _stopRefreshTimer() {
-    if (this._refreshTimer) {
-      clearInterval(this._refreshTimer);
-      this._refreshTimer = null;
-    }
-  }
-
-  // -- Data --------------------------------------------------
-
-  async _fetchWeather() {
-    if (this._config.latitude == null || this._config.longitude == null) {
-      this._render();
-      return;
-    }
-
-    const now = Date.now();
-    const cacheMs = (this._config.refresh_interval || 10) * 60 * 1000;
-    if (this._data && (now - this._lastFetch) < cacheMs) {
-      return;
-    }
+    this._unsubscribeForecast();
 
     try {
-      this._data = await MWHA.Api.fetch(
-        this._config.latitude,
-        this._config.longitude,
-        this._config.units || 'metric',
-        this._config.language || 'fr'
+      this._unsubForecast = await this._hass.connection.subscribeMessage(
+        function(msg) {
+          this._forecast = msg.forecast || [];
+          this._render();
+        }.bind(this),
+        {
+          type: 'weather/subscribe_forecast',
+          forecast_type: 'daily',
+          entity_id: this._config.entity,
+        }
       );
-      this._lastFetch = now;
-      this._render();
+      this._subscribedEntity = this._config.entity;
     } catch (err) {
-      console.error('MWHA Weather:', err);
-      this._renderError(err.message);
+      console.error('MWHA Weather: forecast subscription error', err);
     }
+  }
+
+  _unsubscribeForecast() {
+    if (this._unsubForecast) {
+      this._unsubForecast();
+      this._unsubForecast = null;
+    }
+    this._subscribedEntity = null;
+  }
+
+  // -- Data from HA entity -----------------------------------
+
+  _updateFromEntity() {
+    if (!this._hass || !this._config.entity) {
+      this._render();
+      return;
+    }
+
+    var entity = this._hass.states[this._config.entity];
+    if (!entity) {
+      this._data = null;
+      this._render();
+      return;
+    }
+
+    var stateJSON = JSON.stringify(entity);
+    if (stateJSON === this._lastStateJSON) return;
+    this._lastStateJSON = stateJSON;
+
+    var attrs = entity.attributes;
+    var lang = (this._hass.language || 'fr').slice(0, 2);
+    var weatherCode = attrs.mwha_weather_code;
+    var isDay = attrs.mwha_is_day !== false;
+
+    var description;
+    var icon;
+    if (weatherCode != null) {
+      description = MWHA.Utils.weatherCodeToDescription(weatherCode, lang);
+      icon = MWHA.Utils.weatherCodeToIcon(weatherCode, isDay);
+    } else {
+      description = MWHA.Utils.conditionToDescription(entity.state, lang);
+      icon = MWHA.Utils.conditionToIcon(entity.state, isDay);
+    }
+
+    this._data = {
+      current: {
+        temp: attrs.temperature,
+        feels_like: attrs.mwha_feels_like,
+        humidity: attrs.humidity,
+        pressure: attrs.pressure,
+        visibility: attrs.mwha_visibility_m,
+        wind_speed: attrs.wind_speed,
+        wind_deg: attrs.wind_bearing,
+        description: description,
+        icon: icon,
+        name: this._config.name || attrs.friendly_name || '',
+      },
+      units: {
+        temp: attrs.temperature_unit || '\u00b0C',
+        speed: attrs.wind_speed_unit || 'km/h',
+        pressure: attrs.pressure_unit || 'hPa',
+      },
+    };
+
+    this._render();
   }
 
   // -- Render ------------------------------------------------
 
   _render() {
-    if (this._config.latitude == null || this._config.longitude == null) {
+    if (!this._config.entity) {
       this.shadowRoot.innerHTML = MWHA.Styles.getAll() +
         '<ha-card>' +
         '<div class="mwha-error">' +
         '<div class="mwha-error__title">Configuration requise</div>' +
-        '<div class="mwha-error__message">Ajoutez une latitude et une longitude ou utilisez la localisation Home Assistant.</div>' +
+        '<div class="mwha-error__message">Selectionnez une entite meteo dans la configuration de la carte.</div>' +
         '</div>' +
         '</ha-card>';
       return;
@@ -970,8 +897,8 @@ class MWHAWeatherCard extends HTMLElement {
       return;
     }
 
-    const parts = [MWHA.Styles.getAll(), '<ha-card>'];
-    const cityName = this._config.name || this._data.current.name || '';
+    var parts = [MWHA.Styles.getAll(), '<ha-card>'];
+    var cityName = this._config.name || this._data.current.name || '';
 
     if (cityName) {
       parts.push(
@@ -981,30 +908,23 @@ class MWHAWeatherCard extends HTMLElement {
       );
     }
 
+    var units = this._data.units;
+
     if (this._config.show_current !== false) {
-      parts.push(MWHA.Templates.current(this._data.current, this._config));
+      parts.push(MWHA.Templates.current(this._data.current, this._config, units));
     }
 
     if (this._config.show_details !== false) {
-      parts.push(MWHA.Templates.details(this._data.current, this._config));
+      parts.push(MWHA.Templates.details(this._data.current, this._config, units));
     }
 
-    if (this._config.show_forecast !== false) {
-      parts.push(MWHA.Templates.forecast(this._data.forecast, this._config));
+    if (this._config.show_forecast !== false && this._forecast.length > 0) {
+      var lang = (this._hass && this._hass.language) ? this._hass.language : 'fr';
+      parts.push(MWHA.Templates.forecast(this._forecast, this._config, lang));
     }
 
     parts.push('</ha-card>');
     this.shadowRoot.innerHTML = parts.join('');
-  }
-
-  _renderError(message) {
-    this.shadowRoot.innerHTML = MWHA.Styles.getAll() +
-      '<ha-card>' +
-      '<div class="mwha-error">' +
-      '<div class="mwha-error__title">Erreur</div>' +
-      '<div class="mwha-error__message">' + message + '</div>' +
-      '</div>' +
-      '</ha-card>';
   }
 }
 

@@ -17,7 +17,6 @@ FILES=(
   "utils.js"
   "icons.js"
   "styles.js"
-  "api.js"
   "templates.js"
   "editor.js"
   "card.js"
